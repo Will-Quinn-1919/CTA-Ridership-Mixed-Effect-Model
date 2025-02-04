@@ -1,0 +1,1037 @@
+---
+title: "CTA Ridership Analysis Via Mixed Effect Model with US Census Data As Explanatory Variable"
+author: "William Quinn"
+
+output: 
+  html_document:
+    toc: true
+    number_sections: true
+    self_contained: true
+    includes:
+      after_body: appendix.md
+---
+
+Hello! My name is William Quinn and I am a Political Science and Statistics major at Loyola University of Chicago. This is an independent data analysis project with the goal of identifying what aspects of a CTA rail station's location impact ridership numbers either positively or negatively. This project has 3 key elements:
+
+-   Using the GeoPandas library in Python, we create a function to automatically assign census tracts (smallest unit of geographic measure in US census) to the closest CTA train stop. Any tract that is further then 4km is not considered to be close enough to associate with the station
+
+-   Importing and merging CTA ridership numbers (as found on the Chicago City Open Data portal) and US census data from the year 2000 and 2010
+
+-   The creation of a basic linear mixed-effect model so as to account of the correlation that will be found along the axis of time
+
+Since data importing is not particularly important it can be found at the bottom in the appendix.
+
+# Data Importing {.appendix}
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "C:/Users/willq/Documents/CTA_PROJECT")
+library(scales)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tibble)
+library(regclass)
+library(car)
+library(caret)
+library(janitor)
+library(MASS)
+library(purrr)
+library("lme4")
+library(tidyverse)
+library(ggsci)
+library(see)
+library(cowplot)
+library(performance)
+theme_set(theme_classic())
+```
+
+## Tract Identifiers and Data
+
+### Tract ID \#'s
+
+```{r}
+#2010
+tract1_2010 <- read.csv("2010/tracts_with_closest_station_filtered_2010.csv")
+tract2_2010 <- tract1_2010[,c(5,9,13)]
+tract3_2010 <- tract2_2010 %>%
+  rename(tract = NAME10,
+         land_area = ALAND10,
+         station_id = closest_station_id)
+tract3_2010[, 1:3] <- lapply(tract3_2010[, 1:3], function(x) gsub("[^0-9.]", "", x))
+tract3_2010[, 1:3] <- lapply(tract3_2010[, 1:3], as.numeric)
+
+#2000
+tract1_2000 <- read.csv("2000/tracts_with_closest_station_filtered_2000.csv")
+tract2_2000 <- tract1_2000[,c(5,9,13)]
+tract3_2000 <- tract2_2000 %>%
+  rename(tract = NAME00,
+         land_area = ALAND00,
+         station_id = closest_station_id)
+tract3_2000[, 1:3] <- lapply(tract3_2000[, 1:3], function(x) gsub("[^0-9.]", "", x))
+tract3_2000[, 1:3] <- lapply(tract3_2000[, 1:3], as.numeric)
+```
+
+#### [Population - 2010](https://data.census.gov/table?t=Populations%20and%20People&g=050XX00US17031$1400000&y=2010)
+
+```{r}
+pop_2010 <- read.csv("2010/TRACT_DATA_2010/2010population-DATA.csv")
+pop_name <- read.csv("2010/TRACT_DATA_2010/2010population-Column-Metadata.csv")
+
+pop_name2 <- pop_name[, 2]
+colnames(pop_2010) <- pop_name2
+pop_2010 <- pop_2010[-1,-c(1,4)]
+pop_2010 <- pop_2010 %>%
+  rename(tract = `Geographic Area Name`,
+         population = Total
+         )
+
+pop_2010$tract <- sub("Census Tract ", "", pop_2010$tract)
+pop_2010$tract <- sub(", Cook County, Illinois", "", pop_2010$tract)
+pop_2010$tract <- trimws(pop_2010$tract)
+
+pop_2010[, 1:2] <- lapply(pop_2010[, 1:2], function(x) gsub("[^0-9.]", "", x))
+pop_2010[, 1:2] <- lapply(pop_2010[, 1:2], as.numeric)
+```
+
+#### [Population - 2000](https://data.census.gov/table?t=Populations%20and%20People&g=050XX00US17031$1400000&y=2000)
+
+```{r}
+pop_2000 <- read.csv("2000/TRACT_DATA_2000/2000population-DATA.csv")
+pop_name_2000 <- read.csv("2000/TRACT_DATA_2000/2000population-Column-Metadata.csv")
+
+pop_name_2000_2 <- pop_name_2000[, 2]
+colnames(pop_2000) <- pop_name_2000_2
+pop_2000 <- pop_2000[-1,-c(1,3,6:119)]
+pop_2000 <- pop_2000 %>%
+  filter(`Population Groups` == "Total population")
+pop_2000 <- pop_2000[,-2]
+
+
+pop_2000 <- pop_2000 %>%
+  rename(tract = `Geographic Area Name`,
+         population = `Number!!Total population`
+         )
+
+pop_2000$tract <- sub("Census Tract ", "", pop_2000$tract)
+pop_2000$tract <- sub(", Cook County, Illinois", "", pop_2000$tract)
+pop_2000$tract <- trimws(pop_2000$tract)
+
+pop_2000[, 1:2] <- lapply(pop_2000[, 1:2], function(x) gsub("[^0-9.]", "", x))
+pop_2000[, 1:2] <- lapply(pop_2000[, 1:2], as.numeric)
+```
+
+#### [Population - 2000 - missed](https://data.census.gov/table/DECENNIALDPSF22000.DP1?t=Populations%20and%20People&g=1400000US17031080600,17031150100,17031241700,17031243600,17031270600,17031270900,17031280300,17031280700,17031281100,17031281400,17031281500,17031282100,17031282600,17031284000,17031291800,17031292700,17031311100,17031311200,17031320300,17031330400,17031350500,17031381300,17031381600,17031440500,17031561300,17031581000,17031590100,17031600100,17031690200,17031760900&y=2000)
+
+For some reason the US census website does not like to provide a zip file that contains these tracts with the rest of them. As a result we must also import them separately.
+
+```{r}
+pop_2000_missed <- read.csv("2000/TRACT_DATA_2000/2000population_missing-DATA.csv")
+pop_name_2000_m <- read.csv("2000/TRACT_DATA_2000/2000population_missing-Column-Metadata.csv")
+
+pop_name_2000_m2 <- pop_name_2000_m[, 2]
+colnames(pop_2000_missed) <- pop_name_2000_m2
+
+pop_2000_missed <- pop_2000_missed[-1,c(2,5)]
+
+pop_2000_missed <- pop_2000_missed %>%
+  rename(tract = `Geographic Area Name`,
+         population = `Number!!Total population`
+         )
+
+pop_2000_missed$tract <- sub("Census Tract ", "", pop_2000_missed$tract)
+pop_2000_missed$tract <- sub(", Cook County, Illinois", "", pop_2000_missed$tract)
+pop_2000_missed$tract <- trimws(pop_2000_missed$tract)
+
+pop_2000_missed[, 1:2] <- lapply(pop_2000_missed[, 1:2], function(x) gsub("[^0-9.]", "", x))
+pop_2000_missed[, 1:2] <- lapply(pop_2000_missed[, 1:2], as.numeric)
+```
+
+#### [Poverty - 2010](https://data.census.gov/table?t=Income%20and%20Poverty&g=050XX00US17031$1400000&y=2010)
+
+```{r}
+pov_2010 <- read.csv("2010/TRACT_DATA_2010/2010poverty-Data.csv")
+pov_name <- read.csv("2010/TRACT_DATA_2010/2010poverty-Column-Metadata.csv")
+
+pov_name2 <- pov_name[, 2]
+colnames(pov_2010) <- pov_name2
+pov_2010 <- pov_2010[-1,]
+pov_2010 <- pov_2010[,c(2,11,19,27,35,43,51,59,67,75,83)]
+colnames(pov_2010)[2:11] <- gsub("^Households!!Estimate!!", "", colnames(pov_2010)[2:11])
+colnames(pov_2010)[1] <- "tract"
+
+pov_2010[, 1:11] <- lapply(pov_2010[, 1:11], function(x) gsub("[^0-9.]", "", x))
+pov_2010[, 1:11] <- lapply(pov_2010[, 1:11], as.numeric)
+
+pov_2010$low_income <- pov_2010$`Less than $10,000` +
+  pov_2010$`$10,000 to $14,999` +
+  pov_2010$`$15,000 to $24,999`
+
+pov_2010$middle_income <- pov_2010$`$25,000 to $34,999` +
+  pov_2010$`$35,000 to $49,999` +
+  pov_2010$`$50,000 to $74,999`
+
+pov_2010$high_income <- pov_2010$`$75,000 to $99,999` +
+  pov_2010$`$100,000 to $149,999` +
+  pov_2010$`$150,000 to $199,999` +
+  pov_2010$`$200,000 or more`
+
+pov_2010 <- pov_2010[, !(names(pov_2010) %in% c("Less than $10,000", "$10,000 to $14,999",
+                                 "$15,000 to $24,999", "$25,000 to $34,999",
+                                 "$35,000 to $49,999", "$50,000 to $74,999",
+                                 "$75,000 to $99,999", "$100,000 to $149,999",
+                                 "$150,000 to $199,999", "$200,000 or more"))]
+
+pov_2010$tract <- sub("Census Tract ", "", pov_2010$tract)
+pov_2010$tract <- sub(", Cook County, Illinois", "", pov_2010$tract)
+pov_2010$tract <- trimws(pov_2010$tract)
+```
+
+#### [Poverty - 2000](https://data.census.gov/table?t=Income%20and%20Poverty&g=050XX00US17031$1400000&y=2000)
+
+```{r}
+pov_2000 <- read.csv("2000/TRACT_DATA_2000/2000poverty-Data.csv")
+pov_name_2000 <- read.csv("2000/TRACT_DATA_2000/2000poverty-Column-Metadata.csv")
+
+pov_name2_2000 <- pov_name_2000[, 2]
+colnames(pov_2000) <- pov_name2_2000
+pov_2000 <- pov_2000[-1,]
+pov_2000 <- pov_2000[,c(2,4,100,102,104,106,108,110,112,114,116,118)]
+
+pov_2000 <- pov_2000 %>%
+  filter(`Population Groups` == "Total population")
+
+pov_2000 <- pov_2000[,-2]
+
+colnames(pov_2000)[2:11] <- gsub("^Percent!!INCOME IN 1999!!Households!!", "", colnames(pov_2000)[2:11])
+colnames(pov_2000)[1] <- "tract"
+
+pov_2000[, 1:11] <- lapply(pov_2000[, 1:11], function(x) gsub("[^0-9.]", "", x))
+pov_2000[, 1:11] <- lapply(pov_2000[, 1:11], as.numeric)
+
+pov_2000$low_income <- pov_2000$`Less than $10,000` +
+  pov_2000$`$10,000 to $14,999` +
+  pov_2000$`$15,000 to $24,999`
+
+pov_2000$middle_income <- pov_2000$`$25,000 to $34,999` +
+  pov_2000$`$35,000 to $49,999` +
+  pov_2000$`$50,000 to $74,999`
+
+pov_2000$high_income <- pov_2000$`$75,000 to $99,999` +
+  pov_2000$`$100,000 to $149,999` +
+  pov_2000$`$150,000 to $199,999` +
+  pov_2000$`$200,000 or more`
+
+pov_2000 <- pov_2000[, !(names(pov_2000) %in% c("Less than $10,000", "$10,000 to $14,999",
+                                 "$15,000 to $24,999", "$25,000 to $34,999",
+                                 "$35,000 to $49,999", "$50,000 to $74,999",
+                                 "$75,000 to $99,999", "$100,000 to $149,999",
+                                 "$150,000 to $199,999", "$200,000 or more"))]
+
+pov_2000$tract <- sub("Census Tract ", "", pov_2000$tract)
+pov_2000$tract <- sub(", Cook County, Illinois", "", pov_2000$tract)
+pov_2000$tract <- trimws(pov_2000$tract)
+```
+
+#### [Poverty - 2000 - missed](https://data.census.gov/table?t=Income%20and%20Poverty&g=1400000US17031080600,17031150100,17031241700,17031243600,17031270600,17031270900,17031280300,17031280700,17031281100,17031281400,17031281500,17031282100,17031282600,17031284000,17031291800,17031292700,17031311100,17031311200,17031320300,17031330400,17031350500,17031381300,17031381600,17031440500,17031561300,17031581000,17031590100,17031600100,17031690200,17031760900&y=2000)
+
+```{r}
+pov_2000_missed <- read.csv("2000/TRACT_DATA_2000/2000poverty_missing-Data.csv")
+pov_name_2000_m <- read.csv("2000/TRACT_DATA_2000/2000poverty_missing-Column-Metadata.csv")
+
+pov_name2_2000_m <- pov_name_2000_m[, 2]
+colnames(pov_2000_missed) <- pov_name2_2000_m
+pov_2000_missed <- pov_2000_missed[-1,]
+
+pov_2000_missed <- pov_2000_missed[,c(2,96,98,100,102,104,106,108,110,112,114,116)]
+
+pov_2000_missed <- pov_2000_missed[,-2]
+
+colnames(pov_2000_missed)[2:11] <- gsub("Percent!!INCOME IN 1999!!Households!!", "", colnames(pov_2000_missed)[2:11])
+colnames(pov_2000_missed)[1] <- "tract"
+
+pov_2000_missed[, 1:11] <- lapply(pov_2000_missed[, 1:11], function(x) gsub("[^0-9.]", "", x))
+pov_2000_missed[, 1:11] <- lapply(pov_2000_missed[, 1:11], as.numeric)
+
+pov_2000_missed$low_income <- pov_2000_missed$`Less than $10,000` +
+  pov_2000_missed$`$10,000 to $14,999` +
+  pov_2000_missed$`$15,000 to $24,999`
+
+pov_2000_missed$middle_income <- pov_2000_missed$`$25,000 to $34,999` +
+  pov_2000_missed$`$35,000 to $49,999` +
+  pov_2000_missed$`$50,000 to $74,999`
+
+pov_2000_missed$high_income <- pov_2000_missed$`$75,000 to $99,999` +
+  pov_2000_missed$`$100,000 to $149,999` +
+  pov_2000_missed$`$150,000 to $199,999` +
+  pov_2000_missed$`$200,000 or more`
+
+pov_2000_missed <- pov_2000_missed[, !(names(pov_2000_missed) %in% c("Less than $10,000", "$10,000 to $14,999",
+                                 "$15,000 to $24,999", "$25,000 to $34,999",
+                                 "$35,000 to $49,999", "$50,000 to $74,999",
+                                 "$75,000 to $99,999", "$100,000 to $149,999",
+                                 "$150,000 to $199,999", "$200,000 or more"))]
+
+pov_2000_missed$tract <- sub("Census Tract ", "", pov_2000_missed$tract)
+pov_2000_missed$tract <- sub(", Cook County, Illinois", "", pov_2000_missed$tract)
+pov_2000_missed$tract <- trimws(pov_2000_missed$tract)
+```
+
+#### [Demographic - 2010](https://data.census.gov/table?t=Race%20and%20Ethnicity&g=050XX00US17031$1400000&y=2010)
+
+```{r}
+race_2010 <- read.csv("2010/TRACT_DATA_2010/2010race-Data.csv")
+race_name <- read.csv("2010/TRACT_DATA_2010/2010race-Column-Metadata.csv")
+
+race_name2 <- race_name[, 2]
+colnames(race_2010) <- race_name2
+race_2010 <- race_2010[-1,-c(1,5,6,13:76)]
+
+colnames(race_2010)[3:9] <- gsub("^Total!!", "", colnames(race_2010)[3:9])
+colnames(race_2010)[4:9] <- gsub("Not Hispanic or Latino!!Population of one race!!", "", colnames(race_2010)[4:9])
+race_2010 <- clean_names(dat = race_2010)
+colnames(race_2010)[1] <- "tract"
+race_2010$tract <- sub("Census Tract ", "", race_2010$tract)
+race_2010$tract <- sub(", Cook County, Illinois", "", race_2010$tract)
+
+race_2010[, 1:9] <- lapply(race_2010[, 1:9], function(x) gsub("[^0-9.]", "", x))
+race_2010[, 1:9] <- lapply(race_2010[, 1:9], as.numeric)
+
+race_2010$Other_Race <- race_2010$native_hawaiian_and_other_pacific_islander_alone + race_2010$american_indian_and_alaska_native_alone + race_2010$some_other_race_alone
+race_2010 <- race_2010[,-c(6, 8, 9)]
+
+race_2010[, 3:7] <- lapply(race_2010[, 3:7], function(x) as.numeric(x) / as.numeric(race_2010$total) * 100)
+
+race_2010 <- race_2010[,-2]
+```
+
+#### [Demographic - 2000](https://data.census.gov/table?t=Populations%20and%20People&g=050XX00US17031$1400000&y=2000)
+
+```{r}
+race_2000 <- read.csv("2000/TRACT_DATA_2000/2000race-DATA.csv")
+race_name_2000 <- read.csv("2000/TRACT_DATA_2000/2000race-Column-Metadata.csv")
+
+race_name_2000_2 <- race_name_2000[, 2]
+colnames(race_2000) <- race_name_2000_2
+race_2000 <- race_2000[-1,c(2,4:5)]
+
+race_2000 <- race_2000 %>%
+  rename(tract = `Geographic Area Name`
+         )
+
+race_2000$tract <- sub("Census Tract ", "", race_2000$tract)
+race_2000$tract <- sub(", Cook County, Illinois", "", race_2000$tract)
+race_2000$tract <- trimws(race_2000$tract)
+
+race_2000 <- race_2000 %>%
+  group_by(tract) %>%
+  pivot_wider(names_from = `Population Groups`, values_from = `Number!!Total population`)
+
+race_2000[, 1:7] <- lapply(race_2000[, 1:7], function(x) gsub("[^0-9.]", "", x))
+race_2000[, 1:7] <- lapply(race_2000[, 1:7], as.numeric)
+
+race_2000 <- race_2000 %>%
+  mutate(across(everything(), ~ replace_na(.x, 0)))
+
+race_2000[, 3:7] <- lapply(race_2000[, 3:7], function(x) as.numeric(x) / as.numeric(race_2000$`Total population`) * 100)
+
+race_2000 <- race_2000 %>%
+  rename(hispanic_or_latino = `Hispanic or Latino (of any race) (200-299)`,
+         white_alone = `White alone`,
+         black_or_african_american_alone = `Black or African American alone`,
+         Other_Race = `Some other race alone`,
+         asian_alone = `Asian alone (400-499)`
+         )
+
+race_2000 <- race_2000[,-2]
+```
+
+#### [Demographic - 2000 - missed](https://data.census.gov/table?t=400:451:453:457:461&g=1400000US17031080600,17031150100,17031241700,17031243600,17031270600,17031270900,17031280300,17031280700,17031281100,17031281400,17031281500,17031282100,17031282600,17031284000,17031291800,17031292700,17031311100,17031311200,17031320300,17031330400,17031350500,17031381300,17031381600,17031440500,17031561300,17031581000,17031590100,17031600100,17031690200,17031760900&y=2000)
+
+```{r}
+race_2000_missed <- read.csv("2000/TRACT_DATA_2000/2000race_missing-DATA.csv")
+race_name_2000m <- read.csv("2000/TRACT_DATA_2000/2000race_missing-Column-Metadata.csv")
+
+race_name_2000_2m <- race_name_2000m[, 2]
+colnames(race_2000_missed) <- race_name_2000_2m
+
+race_2000_missed <- race_2000_missed[-1,c(2:5)]
+
+race_2000_missed <- race_2000_missed %>%
+  rename(tract = `Geographic Area Name`
+         )
+
+race_2000_missed$tract <- sub("Census Tract ", "", race_2000_missed$tract)
+race_2000_missed$tract <- sub(", Cook County, Illinois", "", race_2000_missed$tract)
+race_2000_missed$tract <- trimws(race_2000_missed$tract)
+
+race_2000_missed <- race_2000_missed %>%
+  group_by(tract) %>%
+  pivot_wider(names_from = `Population Groups`, values_from = `Number!!Total population`)
+
+race_2000_missed <- race_2000_missed[,-2]
+
+race_2000_missed[, 1:5] <- lapply(race_2000_missed[, 1:5], function(x) gsub("[^0-9.]", "", x))
+race_2000_missed[, 1:5] <- lapply(race_2000_missed[, 1:5], as.numeric)
+
+race_2000_missed <- merge(race_2000_missed, pop_2000_missed, by.x = "tract", by.y = "tract", all.x = TRUE)
+
+race_2000_missed <- race_2000_missed %>%
+  mutate(Other_Race = NA)
+
+race_2000_missed[, 1:7] <- lapply(race_2000_missed[, 1:7], function(x) gsub("[^0-9.]", "", x))
+race_2000_missed[, 1:7] <- lapply(race_2000_missed[, 1:7], as.numeric)
+
+race_2000_missed[, c(2:5,7)] <- lapply(race_2000_missed[, c(2:5,7)], function(x) as.numeric(x) / as.numeric(race_2000_missed$population) * 100)
+
+race_2000_missed <- race_2000_missed %>%
+  rename(hispanic_or_latino = `Hispanic or Latino (of any race) (200-299)`,
+         white_alone = `White alone, not Hispanic or Latino`,
+         black_or_african_american_alone = `Black or African American alone, not Hispanic or Latino`,
+         asian_alone = `Asian alone, not Hispanic or Latino`
+         )
+
+race_2000_missed <- race_2000_missed[,-6]
+
+race_2000_missed <- race_2000_missed %>%
+  group_by(tract) %>%
+  summarize(
+    hispanic_or_latino = sum(hispanic_or_latino),
+    white_alone = sum(white_alone),
+    black_or_african_american_alone = sum(black_or_african_american_alone),
+    asian_alone = sum(asian_alone),
+    Other_Race = sum(Other_Race)
+  )
+```
+
+#### [Vehicles - 2010](https://data.census.gov/table/ACSDP5Y2010.DP04?t=Financial%20Characteristics&g=050XX00US17031$1400000&y=2010)
+
+```{r}
+house_2010 <- read.csv("2010/TRACT_DATA_2010/2010household-Data.csv")
+house_name <- read.csv("2010/TRACT_DATA_2010/2010household-Column-Metadata.csv")
+
+house_name2 <- house_name[, 2]
+colnames(house_2010) <- house_name2
+house_2010 <- house_2010[, !grepl("^Percent Margin of Error!!", colnames(house_2010))]
+house_2010 <- house_2010[, !grepl("^Estimate Margin of Error!!", colnames(house_2010))]
+house_2010 <- house_2010[-1,-c(4:114,123:285)]
+house_2010 <- house_2010[,-c(1,3,4,6,8,10)]
+colnames(house_2010)[2:5] <- gsub("Percent!!VEHICLES AVAILABLE!!", "", colnames(house_2010)[2:5])
+colnames(house_2010)[1] <- "tract"
+house_2010$tract <- sub("Census Tract; ", "", house_2010$tract)
+house_2010$tract <- sub("; Cook County; Illinois", "", house_2010$tract)
+
+house_2010[, 1:5] <- lapply(house_2010[, 1:5], function(x) gsub("[^0-9.]", "", x))
+house_2010[, 1:5] <- lapply(house_2010[, 1:5], as.numeric)
+
+house_2010$vehicle_available <- house_2010$`1 vehicle available` +
+  house_2010$`2 vehicles available` +
+  house_2010$`3 or more vehicles available`
+
+house_2010 <- house_2010[, !(names(house_2010) %in% c("1 vehicle available", "2 vehicles available",
+                                 "3 or more vehicles available"))]
+```
+
+#### [Vehicles - 2000](https://data.census.gov/table?t=Financial%20Characteristics&g=050XX00US17031$1400000&y=2000)
+
+```{r}
+house_2000 <- read.csv("2000/TRACT_DATA_2000/2000household-Data.csv")
+house_name_2000 <- read.csv("2000/TRACT_DATA_2000/2000household-Column-Metadata.csv")
+
+house_name2_2000 <- house_name_2000[, 2]
+colnames(house_2000) <- house_name2_2000
+house_2000 <- house_2000[-1,c(2,4,74,76,78,80)]
+
+house_2000 <- house_2000 %>%
+  filter(`Population Groups` == "Total population")
+
+house_2000 <- house_2000[,-2]
+
+colnames(house_2000)[1] <- "tract"
+
+house_2000$tract <- sub("Census Tract ", "", house_2000$tract)
+house_2000$tract <- sub(", Cook County, Illinois", "", house_2000$tract)
+
+house_2000[, 1:5] <- lapply(house_2000[, 1:5], function(x) gsub("[^0-9.]", "", x))
+house_2000[, 1:5] <- lapply(house_2000[, 1:5], as.numeric)
+
+house_2000$vehicle_available <- house_2000$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!1` +
+  house_2000$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!2` +
+  house_2000$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!3 or more`
+
+house_2000 <- house_2000[, !(names(house_2000) %in% c("Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!1", "Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!2", "Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!3 or more"))]
+
+colnames(house_2000)[2] <- "No vehicles available"
+```
+
+#### Vehicles - 2000 - missed
+
+```{r}
+house_2000_missed <- read.csv("2000/TRACT_DATA_2000/2000household_missing-Data.csv")
+house_name_2000m <- read.csv("2000/TRACT_DATA_2000/2000household_missing-Column-Metadata.csv")
+
+house_name2_2000m <- house_name_2000m[, 2]
+colnames(house_2000_missed) <- house_name2_2000m
+house_2000_missed <- house_2000_missed[-1,c(2,74,76,78,80)]
+
+colnames(house_2000_missed)[1] <- "tract"
+
+house_2000_missed$tract <- sub("Census Tract ", "", house_2000_missed$tract)
+house_2000_missed$tract <- sub(", Cook County, Illinois", "", house_2000_missed$tract)
+
+house_2000_missed[, 1:5] <- lapply(house_2000_missed[, 1:5], function(x) gsub("[^0-9.]", "", x))
+house_2000_missed[, 1:5] <- lapply(house_2000_missed[, 1:5], as.numeric)
+
+house_2000_missed$vehicle_available <- house_2000_missed$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!1` +
+  house_2000_missed$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!2` +
+  house_2000_missed$`Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!3 or more`
+
+house_2000_missed <- house_2000_missed[, !(names(house_2000_missed) %in% c("Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!1", "Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!2", "Percent!!Occupied Housing Units!!VEHICLES AVAILABLE!!3 or more"))]
+
+colnames(house_2000_missed)[2] <- "No vehicles available"
+```
+
+### Merging Tract Data Together
+
+```{r}
+#2010
+tract4_2010 <- merge(tract3_2010, pop_2010, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract5_2010 <- merge(tract4_2010, pov_2010, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract6_2010 <- merge(tract5_2010, race_2010, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract7_2010 <- merge(tract6_2010, house_2010, by.x = "tract", by.y = "tract", all.x = TRUE)
+
+#2000
+pop_2000_fixed <- rbind(pop_2000, pop_2000_missed)
+pov_2000_fixed <- rbind(pov_2000, pov_2000_missed)
+race_2000_fixed <- rbind(race_2000, race_2000_missed)
+house_2000_fixed <- rbind(house_2000, house_2000_missed)
+
+tract4_2000 <- merge(tract3_2000, pop_2000_fixed, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract5_2000 <- merge(tract4_2000, pov_2000_fixed, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract6_2000 <- merge(tract5_2000, race_2000_fixed, by.x = "tract", by.y = "tract", all.x = TRUE)
+tract7_2000 <- merge(tract6_2000, house_2000_fixed, by.x = "tract", by.y = "tract", all.x = TRUE)
+```
+
+#### Cleaning Tract Data
+
+```{r}
+tract7_2010 <- tract7_2010 %>%
+  group_by(station_id) %>%
+  summarise(
+    total_pop_density = sum(population) / sum(land_area) * 1000,
+    
+    avg_low_income = mean(low_income),
+    avg_middle_income = mean(middle_income),
+    avg_high_income = mean(high_income),
+    
+    avg_latino_alone = mean(hispanic_or_latino),
+    avg_white_alone = mean(white_alone),
+    avg_black_alone = mean(black_or_african_american_alone),
+    avg_asian_alone = mean(asian_alone),
+    avg_other = mean(Other_Race),
+    
+    avg_no_vehicles_available = mean(`No vehicles available`),
+    avg_vehicle_available= mean(vehicle_available)
+  )
+
+tract7_2000[is.na(tract7_2000)] <- 0
+
+tract7_2000 <- tract7_2000 %>%
+  group_by(station_id) %>%
+  summarise(
+    total_pop_density = sum(population) / sum(land_area) * 1000,
+    
+    avg_low_income = mean(low_income),
+    avg_middle_income = mean(middle_income),
+    avg_high_income = mean(high_income),
+    
+    avg_latino_alone = mean(hispanic_or_latino),
+    avg_white_alone = mean(white_alone),
+    avg_black_alone = mean(black_or_african_american_alone),
+    avg_asian_alone = mean(asian_alone),
+    avg_other = mean(Other_Race),
+    
+    avg_no_vehicles_available = mean(`No vehicles available`),
+    avg_vehicle_available= mean(vehicle_available)
+  )
+```
+
+## Merging CTA Ridership Data and Census Tract Data
+
+```{r}
+train1 <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+train1$date <- as.Date(train1$date, format="%m/%d/%Y")
+
+train1$year <- format(train1$date, "%Y")
+
+train1_2010 <- train1 %>%
+
+  filter(year %in% 2010)
+
+train1_2000 <- train1 %>%
+
+  filter(year %in% 2001)
+
+train2_2010 <- merge(tract7_2010, train1_2010, by.x = "station_id", by.y = "station_id", all.x = TRUE)
+
+train2_2000 <- merge(tract7_2000, train1_2000, by.x = "station_id", by.y = "station_id", all.x = TRUE)
+
+nrow(train2_2010)
+
+nrow(train2_2000)
+
+train3_tract <- rbind(train2_2010, train2_2000)
+
+train3_tract <- train3_tract[,-c(1,14)]
+```
+
+### Assessing Missing Values (NA Values)
+
+Note: Ohare, Midway, and 47th-dan ryan need new tracts
+
+```{r}
+rows_with_na <- train3_tract[!complete.cases(train3_tract), ]
+
+unique(rows_with_na$stationname)
+
+train3_tract <- na.omit(train3_tract)
+```
+
+# Visualizations
+
+## Distribution of Rides
+
+With an eye towards future modeling, lets take a look at the distribution of the variable "rides" first.
+
+```{r}
+#| echo: false
+train_dist <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+options(scipen = 999)
+ggplot(train_dist, aes(x = rides)) +
+  geom_histogram(binwidth = 1000, fill = "red", color = "black") +
+  labs(title = "Histogram of CTA Ride Count",
+       x = "Ride Count",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+## Average Rides Along Day Type (weekday, Saturday, Sunday)
+
+```{r}
+#| echo: false
+train_time <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+train_time <- train_time %>%
+  mutate(daytype = toupper(daytype))
+
+train_time_d <- train_time %>%
+  group_by(daytype) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average_rides = total_rides / instances
+  )
+
+train_time_d <- train_time_d %>%
+  mutate(daytype = case_when(
+    daytype == "W" ~ "Weekday",
+    daytype == "U" ~ "Sunday",
+    daytype == "A" ~ "Saturday",
+    TRUE ~ daytype
+  ))
+
+train_time_d$daytype <- factor(train_time_d$daytype, levels = c("Weekday", "Saturday", "Sunday"))
+
+ggplot(train_time_d, aes(x = daytype, y = average_rides, fill = daytype)) + 
+  geom_bar(stat = "identity", color = "black") + 
+  labs(title = "Average of Total Rides by Day Type", x = "Day Type", y = "Average Rides") +
+  theme_minimal()
+```
+
+## Average Rides Along Years (2000-2024)
+
+```{r}
+#| echo: false
+train_time$date <- as.Date(train_time$date, format="%m/%d/%Y")
+
+train_time$year <- format(train_time$date, "%Y")
+
+train_time_y <- train_time %>%
+  group_by(year) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average = total_rides / instances
+  )
+
+plot(train_time_y$year, train_time_y$average, 
+     main = "Scatter Plot of Average CTA Rides per Year", 
+     xlab = "Year", 
+     ylab = "Average Rides", 
+     pch = 19, 
+     col = "black", 
+     type = "b", 
+     lty = 1,   
+     cex = 1,
+     lwd = 2)
+```
+
+## Average Rides Along Months of the Year
+
+```{r}
+#| echo: false
+train_time$month <- format(train_time$date, "%m")
+
+train_time_m <- train_time %>%
+  group_by(month) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average = total_rides / instances
+  )
+
+plot(train_time_m$month, train_time_m$average, 
+     main = "Scatter Plot of Average CTA Rides per Month", 
+     xlab = "Month", 
+     ylab = "Average Rides", 
+     pch = 19, 
+     col = "black", 
+     type = "b", 
+     lty = 1,   
+     cex = 1,
+     lwd = 2)
+```
+
+## Average Rides Between Lines
+
+```{r}
+#| echo: false
+train1 <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+train2 <- train1 %>%
+  rename(station = stationname)
+
+# total rides per stop
+
+train3 <- train2 %>%
+  filter(!(station %in% c("Homan")))
+
+train4 <- train3 %>%
+  group_by(station) %>%
+  summarize(total_rides = sum(rides)) %>%
+  arrange(desc(total_rides))
+
+train8 <- train2 %>%
+  mutate(
+    rides = case_when(
+      station %in% c("Clark/Lake", "Lake/State") ~ rides / 6,
+      station %in% c("Adams/Wabash", "Washington/Wabash") ~ rides / 5,
+      station %in% c("Washington/Wells", "Quincy/Wells", "LaSalle/Van Buren", "Library") ~ rides / 4,
+      station %in% c("Roosevelt", "Belmont-North Main", "Fullerton", "Howard") ~ rides / 3,
+      station %in% c("Clinton-Lake", "Morgan-Lake", "Medical Center", "Armitage", "Wellington", "Diversey", "Sedgwick", "Chicago/Franklin", "Merchandise Mart") ~ rides / 2,
+      TRUE ~ rides 
+    )
+  )
+
+train9 <- train8 %>%
+  group_by(station) %>%
+  summarize(total_rides = sum(rides)) %>%
+  arrange(desc(total_rides))
+
+# red
+
+red_line_stations <- data.frame(
+  station = c(
+    "Howard", "Jarvis", "Morse", "Loyola",
+    "Granville", "Thorndale", "Bryn Mawr", "Berwyn", 
+    "Argyle", "Lawrence", "Wilson",  "Sheridan",
+    "Addison-North Main", "Belmont-North Main", "Fullerton", "North/Clybourn",
+    "Clark/Division", "Chicago/State", "Grand/State", "Lake/State",
+    "Monroe/State", "Jackson/State", "Harrison", "Roosevelt",
+    "Cermak-Chinatown", "Sox-35th-Dan Ryan", "47th-Dan Ryan", "Garfield-Dan Ryan",
+    "63rd-Dan Ryan", "69th", "79th", "87th", 
+    "95th/Dan Ryan"), line = "Red" )
+
+# orange
+
+orange_line_stations <- data.frame(
+  station = c(
+    "Midway Airport", "Pulaski-Orange", "Kedzie-Midway", "Western-Orange",
+    "35th/Archer", "Ashland-Orange", "Halsted-Orange", "Roosevelt",
+    "Library", "LaSalle/Van Buren", "Quincy/Wells", "Washington/Wells",
+    "Clark/Lake", "State/Lake", "Adams/Wabash", "Washington/Wabash"),
+  line = "Orange")
+
+# Blue
+
+blue_line_stations <- data.frame(
+  station = c(
+    "O'Hare Airport", "Rosemont", "Cumberland", "Harlem-O'Hare",
+    "Jefferson Park", "Montrose-O'Hare", "Irving Park-O'Hare", "Addison-O'Hare",
+    "Belmont-O'Hare", "Logan Square", "California/Milwaukee", "Western/Milwaukee",
+    "Damen/Milwaukee", "Division/Milwaukee", "Chicago/Milwaukee", "Grand/Milwaukee",
+    "Clark/Lake", "Washington/Dearborn", "Monroe/Dearborn", "Jackson/Dearborn",
+    "LaSalle", "Clinton-Forest Park", "UIC-Halsted", "Racine",
+    "Medical Center", "Western-Forest Park", "Kedzie-Homan-Forest Park",  "Pulaski-Forest Park", 
+    "Cicero-Forest Park", "Austin-Forest Park", "Oak Park-Forest Park", "Harlem-Forest Park",
+    "Forest Park"), line = "Blue")
+
+# Brown
+
+brown_line_stations <- data.frame(
+  station = c(
+    "Kimball", "Francisco", "Rockwell", "Western-Brown", "Damen-Brown",
+    "Montrose-Brown", "Irving Park-Brown", "Addison-Brown", "Paulina",
+    "Southport", "Belmont-North Main", "Wellington", "Diversey", "Fullerton",
+    "Armitage", "Sedgwick", "Chicago/Franklin", "Merchandise Mart", 
+    "Washington/Wells", "Quincy/Wells", "LaSalle/Van Buren", "Library", 
+    "Adams/Wabash", "Washington/Wabash", "State/Lake", "Clark/Lake"),
+  line = "Brown")
+
+# Purple
+purple_line_stations <- data.frame(
+  station = c(
+    "Howard", "South Boulevard", "Main", "Dempster", "Davis", 
+    "Foster", "Noyes", "Central", "Linden", "Wilson", "Belmont-North Main",
+    "Wellington", "Diversey", "Fullerton", "Armitage", "Sedgwick", 
+    "Chicago/Franklin", "Merchandise Mart", "Washington/Wells", "Quincy/Wells", 
+    "LaSalle/Van Buren", "Library", "Adams/Wabash", "Washington/Wabash", 
+    "State/Lake", "Clark/Lake"),
+  line = "Purple")
+
+# Green
+green_line_stations <- data.frame(
+  station = c(
+    "Ashland/63rd", "Cottage Grove", "King Drive", "Halsted", 
+    "Garfield-South Elevated", "51st", "47th-South Elevated", "43rd",
+    "Indiana", "35-Bronzeville-IIT", "Cermak-McCormick Place", "Roosevelt",
+    "Adams/Wabash", "Washington/Wabash", "State/Lake", "Clark/Lake",
+    "Clinton-Lake", "Morgan-Lake", "Ashland-Lake", "Damen-Lake",
+    "California-Lake", "Kedzie-Lake", "Conservatory-Central Park Drive", "Pulaski-Lake",
+    "Cicero-Lake", "Laramie", "Central-Lake", "Austin-Lake", 
+    "Ridgeland", "Oak Park-Lake", "Harlem-Lake"), line = "Green")
+
+# Pink
+
+pink_line_stations <- data.frame(
+  station = c(
+    "Clark/Lake", "State/Lake", "Washington/Wabash", "Adams/Wabash", "Library",
+    "LaSalle/Van Buren", "Quincy/Wells", "Washington/Wells", "Clinton-Lake",
+    "Morgan-Lake", "Ashland-Lake", "Polk", "18th", 
+    "Damen-Cermak", "Western-Cermak", "California-Cermak", "Kedzie-Cermak", 
+    "Central Park", "Pulaski-Cermak", "Kostner", "Cicero-Cermak", 
+    "54th/Cermak"), line = "Pink")
+
+# Yellow
+
+yellow_line_stations <- data.frame(
+  station = c(
+    "Howard", "Dempster-Skokie", "Oakton-Skokie"), line = "Yellow")
+
+# Combine all line datasets
+
+all_lines <- rbind(
+  red_line_stations %>% mutate(line = "Red"),
+  orange_line_stations %>% mutate(line = "Orange"),
+  blue_line_stations %>% mutate(line = "Blue"),
+  brown_line_stations %>% mutate(line = "Brown"),
+  purple_line_stations %>% mutate(line = "Purple"),
+  green_line_stations %>% mutate(line = "Green"),
+  pink_line_stations %>% mutate(line = "Pink"),
+  yellow_line_stations %>% mutate(line = "Yellow")
+)
+
+station_lines <- all_lines %>%
+  mutate(value = 1) %>% 
+  pivot_wider(
+    names_from = line,  
+    values_from = value,
+    values_fill = 0     
+  )
+
+train10 <- merge(train8, station_lines, by = "station", all.x = TRUE)
+
+train10$date <- as.Date(train10$date, format = "%m/%d/%Y")
+train10$year <- format(train10$date, "%Y")
+train10$month <- format(train10$date, "%m")
+
+train11 <- train10 %>%
+  pivot_longer(
+    cols = c(Red, Orange, Blue, Brown, Purple, Green, Pink, Yellow), 
+    names_to = "line",  
+    values_to = "served",  
+    values_drop_na = TRUE  
+  ) %>%
+  filter(served == 1)  
+
+train12 <- train11 %>%
+  group_by(year, line) %>%
+  summarise(
+    total_rides = sum(rides, na.rm = TRUE),
+    instances = n(),
+    average_rides = total_rides / instances,
+    .groups = "drop"
+  )
+
+train13 <- train11 %>%
+  group_by(month, line) %>%
+  summarise(
+    total_rides = sum(rides, na.rm = TRUE),
+    instances = n(),
+    average_rides = total_rides / instances,
+    .groups = "drop"
+  )
+
+train12$year <- as.numeric(train12$year)
+train13$month <- as.numeric(train13$month)
+
+
+ggplot(train12, aes(x = year, y = average_rides, color = line, group = line)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Average CTA Rides per Year by Line",
+    x = "Year",
+    y = "Average Rides"
+  ) +
+  scale_color_manual(
+    values = c(
+      "Red" = "red", 
+      "Orange" = "orange", 
+      "Blue" = "blue", 
+      "Brown" = "brown", 
+      "Purple" = "purple", 
+      "Green" = "green", 
+      "Pink" = "pink", 
+      "Yellow" = "yellow"
+    )
+  ) +
+  scale_x_continuous(labels = function(x) sprintf("%02d", x %% 100)) +
+  theme_minimal() +
+  theme(
+    legend.key.height = unit(0.5, "cm"),    
+    legend.key.width = unit(0.15, "cm")         
+  )
+
+ggplot(train13, aes(x = month, y = average_rides, color = line, group = line)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Average CTA Rides by Month by Line",
+    x = "Month",
+    y = "Average Rides"
+  ) +
+  scale_color_manual(
+    values = c(
+      "Red" = "red", 
+      "Orange" = "orange", 
+      "Blue" = "blue", 
+      "Brown" = "brown", 
+      "Purple" = "purple", 
+      "Green" = "green", 
+      "Pink" = "pink", 
+      "Yellow" = "yellow"
+    )
+  ) +
+  scale_x_continuous(breaks = 1:12) +
+  theme_minimal()+ 
+    theme(
+    legend.key.height = unit(0.5, "cm"),    
+    legend.key.width = unit(0.15, "cm")         
+  )
+```
+
+## Population Density Against Rides
+
+```{r}
+#| echo: false
+train3_tract %>%
+  ggplot(aes(x = total_pop_density, y = rides, col = year)) +
+  geom_point() +
+  facet_wrap(vars(year)) +
+  labs(
+    title = "CTA Rides Years 2001 vs 2010 Along Population Density",
+    x = "Population Density",
+    y = "Rides"
+  ) 
+
+train4_tract <- train3_tract %>%
+  group_by(year, stationname, total_pop_density) %>%
+  summarise(
+    mean_rides = mean(rides, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+train4_tract %>%
+  ggplot(aes(x = total_pop_density, y = mean_rides, col = year)) +
+  geom_point() +
+  facet_wrap(vars(year)) +
+  labs(
+    title = "Average CTA Rides Years 2001 vs 2010 Along Population Density",
+    x = "Population Density",
+    y = "Average Rides"
+  ) 
+```
+
+# Mixed Effect Model
+
+## Basic Linear Model
+
+```{r}
+linear_1 <- lmer(rides ~ 
+total_pop_density
++ avg_low_income
++ avg_middle_income
++ avg_latino_alone
++ avg_white_alone
++ avg_asian_alone
++ avg_other
++ avg_vehicle_available 
++ (1 | year), train3_tract)
+
+linear_2 <- lmer(rides ~ 
+total_pop_density
++ avg_low_income
++ avg_middle_income
++ avg_latino_alone
++ avg_white_alone
++ avg_asian_alone
++ avg_other
++ avg_vehicle_available 
++ (1 | daytype) 
++ (1 | year), train3_tract)
+
+linear_3 <- lmer(rides ~ 
+total_pop_density
++ avg_low_income
++ avg_middle_income
++ avg_latino_alone
++ avg_white_alone
++ avg_asian_alone
++ avg_other
++ avg_vehicle_available
++ (1 | stationname) 
++ (1 | daytype) 
++ (1 | year), train3_tract)
+
+AIC(linear_1)
+AIC(linear_2)
+AIC(linear_3)
+
+summary(linear_3)
+
+r2_nakagawa(linear_3)
+
+```
+
+### Assumption Validity
+
+```{r}
+#| echo: false
+plot(resid(linear_3) ~ fitted(linear_3), main = "Residuals vs Fitted", xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+qqnorm(resid(linear_3))
+qqline(resid(linear_3), col = "red", lty = 2)
+
+```
