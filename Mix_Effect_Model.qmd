@@ -3,12 +3,15 @@ title: "CTA Ridership Analysis Via Mixed Effect Model with US Census Data As Exp
 author: "William Quinn"
 
 output: 
+  pdf_document:
+    toc: true
+    number_sections: true
   html_document:
     toc: true
     number_sections: true
     self_contained: true
-    includes:
-      after_body: appendix.md
+includes:
+  after_body: appendix.md
 ---
 
 Hello! My name is William Quinn and I am a Political Science and Statistics major at Loyola University of Chicago. This is an independent data analysis project with the goal of identifying what aspects of a CTA rail station's location impact ridership numbers either positively or negatively. This project has 3 key elements:
@@ -24,7 +27,6 @@ Since data importing is not particularly important it can be found at the bottom
 # Data Importing {.appendix}
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "C:/Users/willq/Documents/CTA_PROJECT")
 library(scales)
 library(dplyr)
 library(ggplot2)
@@ -42,6 +44,7 @@ library(ggsci)
 library(see)
 library(cowplot)
 library(performance)
+library(RCurl)
 theme_set(theme_classic())
 ```
 
@@ -242,13 +245,13 @@ plt.show()
 
 The final map looks like this:
 
-![](Tract Map.jpg){width="325"}
+![](Tract%20Map.jpg){width="325"}
 
-#### Importing Tract ID 
+#### Importing Tract ID
 
 ```{r}
 #2010
-tract1_2010 <- read.csv("2010/tracts_with_closest_station_filtered_2010.csv")
+tract1_2010 <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2010/tracts_with_closest_station_filtered_2010.csv")
 tract2_2010 <- tract1_2010[,c(5,9,13)]
 tract3_2010 <- tract2_2010 %>%
   rename(tract = NAME10,
@@ -258,7 +261,7 @@ tract3_2010[, 1:3] <- lapply(tract3_2010[, 1:3], function(x) gsub("[^0-9.]", "",
 tract3_2010[, 1:3] <- lapply(tract3_2010[, 1:3], as.numeric)
 
 #2000
-tract1_2000 <- read.csv("2000/tracts_with_closest_station_filtered_2000.csv")
+tract1_2000 <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2000/tracts_with_closest_station_filtered_2000.csv")
 tract2_2000 <- tract1_2000[,c(5,9,13)]
 tract3_2000 <- tract2_2000 %>%
   rename(tract = NAME00,
@@ -273,8 +276,8 @@ tract3_2000[, 1:3] <- lapply(tract3_2000[, 1:3], as.numeric)
 #### [Population - 2010](https://data.census.gov/table?t=Populations%20and%20People&g=050XX00US17031$1400000&y=2010)
 
 ```{r}
-pop_2010 <- read.csv("2010/TRACT_DATA_2010/2010population-DATA.csv")
-pop_name <- read.csv("2010/TRACT_DATA_2010/2010population-Column-Metadata.csv")
+pop_2010 <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2010/TRACT_DATA_2010/2010population-Data.csv")
+pop_name <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2010/TRACT_DATA_2010/2010population-Column-Metadata.csv")
 
 pop_name2 <- pop_name[, 2]
 colnames(pop_2010) <- pop_name2
@@ -295,8 +298,8 @@ pop_2010[, 1:2] <- lapply(pop_2010[, 1:2], as.numeric)
 #### [Population - 2000](https://data.census.gov/table?t=Populations%20and%20People&g=050XX00US17031$1400000&y=2000)
 
 ```{r}
-pop_2000 <- read.csv("2000/TRACT_DATA_2000/2000population-DATA.csv")
-pop_name_2000 <- read.csv("2000/TRACT_DATA_2000/2000population-Column-Metadata.csv")
+pop_2000 <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2000/TRACT_DATA_2000/2000population-Data.csv")
+pop_name_2000 <- read.csv("https://raw.githubusercontent.com/Will-Quinn-1919/CTA-Ridership-Mixed-Effect-Model/refs/heads/master/2000/TRACT_DATA_2000/2000population-Column-Metadata.csv")
 
 pop_name_2000_2 <- pop_name_2000[, 2]
 colnames(pop_2000) <- pop_name_2000_2
@@ -762,6 +765,7 @@ train1 <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
 train1$date <- as.Date(train1$date, format="%m/%d/%Y")
 
 train1$year <- format(train1$date, "%Y")
+train1$month <- format(train1$date, "%m")
 
 train1_2010 <- train1 %>%
 
@@ -796,154 +800,10 @@ unique(rows_with_na$stationname)
 train3_tract <- na.omit(train3_tract)
 ```
 
-# Visualizations
-
-## Distribution of Rides
-
-With an eye towards future modeling, lets take a look at the distribution of the variable "rides" first.
+# Adding "Line" Variable
 
 ```{r}
 #| echo: false
-train_dist <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
-options(scipen = 999)
-ggplot(train_dist, aes(x = rides)) +
-  geom_histogram(binwidth = 1000, fill = "red", color = "black") +
-  labs(title = "Histogram of CTA Ride Count",
-       x = "Ride Count",
-       y = "Frequency") +
-  theme_minimal()
-```
-
-As we can see, this is far from a normal distribution. This suggests the use of a GLM perhaps. First, let's investigate observations above "rides" = 20,000 for potential incorrect data.
-
-### Outlier Assessment
-
-```{r}
-
-```
-
-## Average Rides Along Day Type (weekday, Saturday, Sunday)
-
-```{r}
-#| echo: false
-train_time <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
-
-train_time <- train_time %>%
-  mutate(daytype = toupper(daytype))
-
-train_time_d <- train_time %>%
-  group_by(daytype) %>%
-  summarise(
-    total_rides = sum(rides),
-    instances = n(),
-    average_rides = total_rides / instances
-  )
-
-train_time_d <- train_time_d %>%
-  mutate(daytype = case_when(
-    daytype == "W" ~ "Weekday",
-    daytype == "U" ~ "Sunday",
-    daytype == "A" ~ "Saturday",
-    TRUE ~ daytype
-  ))
-
-train_time_d$daytype <- factor(train_time_d$daytype, levels = c("Weekday", "Saturday", "Sunday"))
-
-ggplot(train_time_d, aes(x = daytype, y = average_rides, fill = daytype)) + 
-  geom_bar(stat = "identity", color = "black") + 
-  labs(title = "Average of Total Rides by Day Type", x = "Day Type", y = "Average Rides") +
-  theme_minimal()
-```
-
-## Average Rides Along Years (2000-2024)
-
-```{r}
-#| echo: false
-train_time$date <- as.Date(train_time$date, format="%m/%d/%Y")
-
-train_time$year <- format(train_time$date, "%Y")
-
-train_time_y <- train_time %>%
-  group_by(year) %>%
-  summarise(
-    total_rides = sum(rides),
-    instances = n(),
-    average = total_rides / instances
-  )
-
-plot(train_time_y$year, train_time_y$average, 
-     main = "Scatter Plot of Average CTA Rides per Year", 
-     xlab = "Year", 
-     ylab = "Average Rides", 
-     pch = 19, 
-     col = "black", 
-     type = "b", 
-     lty = 1,   
-     cex = 1,
-     lwd = 2)
-```
-
-## Average Rides Along Months of the Year
-
-```{r}
-#| echo: false
-train_time$month <- format(train_time$date, "%m")
-
-train_time_m <- train_time %>%
-  group_by(month) %>%
-  summarise(
-    total_rides = sum(rides),
-    instances = n(),
-    average = total_rides / instances
-  )
-
-plot(train_time_m$month, train_time_m$average, 
-     main = "Scatter Plot of Average CTA Rides per Month", 
-     xlab = "Month", 
-     ylab = "Average Rides", 
-     pch = 19, 
-     col = "black", 
-     type = "b", 
-     lty = 1,   
-     cex = 1,
-     lwd = 2)
-```
-
-## Average Rides Between Lines
-
-```{r}
-#| echo: false
-train1 <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
-
-train2 <- train1 %>%
-  rename(station = stationname)
-
-# total rides per stop
-
-train3 <- train2 %>%
-  filter(!(station %in% c("Homan")))
-
-train4 <- train3 %>%
-  group_by(station) %>%
-  summarize(total_rides = sum(rides)) %>%
-  arrange(desc(total_rides))
-
-train8 <- train2 %>%
-  mutate(
-    rides = case_when(
-      station %in% c("Clark/Lake", "Lake/State") ~ rides / 6,
-      station %in% c("Adams/Wabash", "Washington/Wabash") ~ rides / 5,
-      station %in% c("Washington/Wells", "Quincy/Wells", "LaSalle/Van Buren", "Library") ~ rides / 4,
-      station %in% c("Roosevelt", "Belmont-North Main", "Fullerton", "Howard") ~ rides / 3,
-      station %in% c("Clinton-Lake", "Morgan-Lake", "Medical Center", "Armitage", "Wellington", "Diversey", "Sedgwick", "Chicago/Franklin", "Merchandise Mart") ~ rides / 2,
-      TRUE ~ rides 
-    )
-  )
-
-train9 <- train8 %>%
-  group_by(station) %>%
-  summarize(total_rides = sum(rides)) %>%
-  arrange(desc(total_rides))
 
 # red
 
@@ -1056,13 +916,138 @@ station_lines <- all_lines %>%
     values_fill = 0     
   )
 
-train10 <- merge(train8, station_lines, by = "station", all.x = TRUE)
+train4_tract <- merge(train3_tract, station_lines, by.x = "stationname", by.y = "station", all.x = TRUE)
+```
 
-train10$date <- as.Date(train10$date, format = "%m/%d/%Y")
-train10$year <- format(train10$date, "%Y")
-train10$month <- format(train10$date, "%m")
+# Visualizations
 
-train11 <- train10 %>%
+## Distribution of Rides
+
+With an eye towards future modeling, lets take a look at the distribution of the variable "rides" first.
+
+```{r}
+#| echo: false
+
+train_dist <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+options(scipen = 999)
+ggplot(train_dist, aes(x = rides)) +
+  geom_histogram(binwidth = 1000, fill = "red", color = "black") +
+  labs(title = "Histogram of CTA Ride Count",
+       x = "Ride Count",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+## Average Rides Along Day Type (weekday, Saturday, Sunday)
+
+```{r}
+#| echo: false
+
+train_time <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+train_time <- train_time %>%
+  mutate(daytype = toupper(daytype))
+
+train_time_d <- train_time %>%
+  group_by(daytype) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average_rides = total_rides / instances
+  )
+
+train_time_d <- train_time_d %>%
+  mutate(daytype = case_when(
+    daytype == "W" ~ "Weekday",
+    daytype == "U" ~ "Sunday",
+    daytype == "A" ~ "Saturday",
+    TRUE ~ daytype
+  ))
+
+train_time_d$daytype <- factor(train_time_d$daytype, levels = c("Weekday", "Saturday", "Sunday"))
+
+ggplot(train_time_d, aes(x = daytype, y = average_rides, fill = daytype)) + 
+  geom_bar(stat = "identity", color = "black") + 
+  labs(title = "Average of Total Rides by Day Type", x = "Day Type", y = "Average Rides") +
+  theme_minimal()
+```
+
+## Average Rides Along Years (2000-2024)
+
+```{r}
+#| echo: false
+train_time$date <- as.Date(train_time$date, format="%m/%d/%Y")
+
+train_time$year <- format(train_time$date, "%Y")
+
+train_time_y <- train_time %>%
+  group_by(year) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average = total_rides / instances
+  )
+
+plot(train_time_y$year, train_time_y$average, 
+     main = "Scatter Plot of Average CTA Rides per Year", 
+     xlab = "Year", 
+     ylab = "Average Rides", 
+     pch = 19, 
+     col = "black", 
+     type = "b", 
+     lty = 1,   
+     cex = 1,
+     lwd = 2)
+```
+
+## Average Rides Along Months of the Year
+
+```{r}
+#| echo: false
+train_time$month <- format(train_time$date, "%m")
+
+train_time_m <- train_time %>%
+  group_by(month) %>%
+  summarise(
+    total_rides = sum(rides),
+    instances = n(),
+    average = total_rides / instances
+  )
+
+plot(train_time_m$month, train_time_m$average, 
+     main = "Scatter Plot of Average CTA Rides per Month", 
+     xlab = "Month", 
+     ylab = "Average Rides", 
+     pch = 19, 
+     col = "black", 
+     type = "b", 
+     lty = 1,   
+     cex = 1,
+     lwd = 2)
+```
+
+## Average Rides Between Lines Across Year
+
+```{r}
+#| echo: false
+train_time2 <- read.csv('CTA_RAW_DATA/CTA_RIDERSHIP_DATA.csv')
+
+train_line <- train_time2 %>%
+  mutate(
+    rides = case_when(
+      stationname %in% c("Clark/Lake", "Lake/State") ~ rides / 6,
+      stationname %in% c("Adams/Wabash", "Washington/Wabash") ~ rides / 5,
+      stationname %in% c("Washington/Wells", "Quincy/Wells", "LaSalle/Van Buren", "Library") ~ rides / 4,
+      stationname %in% c("Roosevelt", "Belmont-North Main", "Fullerton", "Howard") ~ rides / 3,
+      stationname %in% c("Clinton-Lake", "Morgan-Lake", "Medical Center", "Armitage", "Wellington", "Diversey", "Sedgwick", "Chicago/Franklin", "Merchandise Mart") ~ rides / 2,
+      TRUE ~ rides 
+    )
+  )
+
+train_line <- merge(train_line, station_lines, by.x = "stationname", by.y = "station")
+
+train_line2 <- train_line %>%
   pivot_longer(
     cols = c(Red, Orange, Blue, Brown, Purple, Green, Pink, Yellow), 
     names_to = "line",  
@@ -1071,7 +1056,10 @@ train11 <- train10 %>%
   ) %>%
   filter(served == 1)  
 
-train12 <- train11 %>%
+train_line2$date <- as.Date(train_line2$date, format="%m/%d/%Y")
+train_line2$year <- format(train_line2$date, "%Y")
+
+train_line_y <- train_line2 %>%
   group_by(year, line) %>%
   summarise(
     total_rides = sum(rides, na.rm = TRUE),
@@ -1080,20 +1068,9 @@ train12 <- train11 %>%
     .groups = "drop"
   )
 
-train13 <- train11 %>%
-  group_by(month, line) %>%
-  summarise(
-    total_rides = sum(rides, na.rm = TRUE),
-    instances = n(),
-    average_rides = total_rides / instances,
-    .groups = "drop"
-  )
+train_line_y$year <- as.numeric(train_line_y$year)
 
-train12$year <- as.numeric(train12$year)
-train13$month <- as.numeric(train13$month)
-
-
-ggplot(train12, aes(x = year, y = average_rides, color = line, group = line)) +
+ggplot(train_line_y, aes(x = year, y = average_rides, color = line, group = line)) +
   geom_line() +
   geom_point() +
   labs(
@@ -1120,39 +1097,15 @@ ggplot(train12, aes(x = year, y = average_rides, color = line, group = line)) +
     legend.key.width = unit(0.15, "cm")         
   )
 
-ggplot(train13, aes(x = month, y = average_rides, color = line, group = line)) +
-  geom_line() +
-  geom_point() +
-  labs(
-    title = "Average CTA Rides by Month by Line",
-    x = "Month",
-    y = "Average Rides"
-  ) +
-  scale_color_manual(
-    values = c(
-      "Red" = "red", 
-      "Orange" = "orange", 
-      "Blue" = "blue", 
-      "Brown" = "brown", 
-      "Purple" = "purple", 
-      "Green" = "green", 
-      "Pink" = "pink", 
-      "Yellow" = "yellow"
-    )
-  ) +
-  scale_x_continuous(breaks = 1:12) +
-  theme_minimal()+ 
-    theme(
-    legend.key.height = unit(0.5, "cm"),    
-    legend.key.width = unit(0.15, "cm")         
-  )
 ```
 
-## Population Density Against Rides
+# Model Visualizations
+
+## Year
 
 ```{r}
 #| echo: false
-train3_tract %>%
+train4_tract %>%
   ggplot(aes(x = total_pop_density, y = rides, col = year)) +
   geom_point() +
   facet_wrap(vars(year)) +
@@ -1162,22 +1115,118 @@ train3_tract %>%
     y = "Rides"
   ) 
 
-train4_tract <- train3_tract %>%
+train4_tract_year <- train4_tract %>%
   group_by(year, stationname, total_pop_density) %>%
   summarise(
     mean_rides = mean(rides, na.rm = TRUE),
     .groups = "drop"
   )
 
-train4_tract %>%
+train4_tract_year %>%
   ggplot(aes(x = total_pop_density, y = mean_rides, col = year)) +
   geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
   facet_wrap(vars(year)) +
   labs(
     title = "Average CTA Rides Years 2001 vs 2010 Along Population Density",
     x = "Population Density",
     y = "Average Rides"
   ) 
+```
+
+## Line
+
+```{r}
+train4_tract_line <- train4_tract %>%
+  mutate(line = case_when(
+    Purple == 1 ~ "Pruple",
+    Brown == 1 ~ "Brown",
+    TRUE ~ NA_character_ # どちらも1でない場合はNAにする
+  )) %>%
+  na.omit()
+
+train4_tract_line <- train4_tract_line %>%
+  group_by(line, stationname, total_pop_density) %>%
+  summarise(
+    mean_rides = mean(rides, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(train4_tract_line, aes(x = total_pop_density, y = mean_rides, col = line)) +
+  geom_point() +  # 散布図
+  geom_smooth(method = "lm", se = FALSE) +  # 回帰直線を追加（信頼区間なし）
+  facet_wrap(vars(line)) +  # ラインごとに分割
+  labs(
+    title = "Average CTA Rides: Red vs Blue Line Along Population Density",
+    x = "Population Density",
+    y = "Average Rides",
+    color = "CTA Line"
+  ) +
+  theme_minimal() +
+  scale_color_manual(
+    values = c(
+      "Pruple" = "purple", 
+      "Brown" = "brown"
+    ))
+```
+
+## Day type
+
+```{r}
+train4_tract_day <- train4_tract %>%
+  group_by(daytype, stationname, total_pop_density) %>%
+  summarise(
+    mean_rides = mean(rides, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+train4_tract_day <- train4_tract_day %>%
+  mutate(daytype = case_when(
+    daytype == "W" ~ "Weekday",
+    daytype == "U" ~ "Sunday",
+    daytype == "A" ~ "Saturday",
+    TRUE ~ daytype
+  ))
+
+train4_tract_day$daytype <- factor(train4_tract_day$daytype, levels = c("Weekday", "Saturday", "Sunday"))
+
+ggplot(train4_tract_day, aes(x = total_pop_density, y = mean_rides, col = daytype)) +
+  geom_point() +  # 散布図
+  geom_smooth(method = "lm", se = FALSE) +  # 回帰直線を追加（信頼区間なし）
+  facet_wrap(vars(daytype)) +  # ラインごとに分割
+  labs(
+    title = "Average CTA Rides: Day Type Along Population Density",
+    x = "Population Density",
+    y = "Average Rides",
+    color = "CTA Line"
+  ) +
+  theme_minimal()
+```
+
+## Month
+
+```{r}
+train4_tract$month <- as.numeric(train4_tract$month)
+
+train4_tract_month <- train4_tract %>%
+  filter(month %in% c(1, 5, 9))
+
+train4_tract_month <- train4_tract_month %>%
+  group_by(month, stationname, total_pop_density) %>%
+  summarise(
+    mean_rides = mean(rides, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(train4_tract_month, aes(x = total_pop_density, y = mean_rides, col = month)) +
+  geom_point() +  # 散布図
+  geom_smooth(method = "lm", se = FALSE) +  # 回帰直線を追加（信頼区間なし）
+  facet_wrap(vars(month)) +  # ラインごとに分割
+  labs(
+    title = "Average CTA Rides: Month Along Population Density",
+    x = "Population Density",
+    y = "Average Rides") +
+  theme_minimal()
 ```
 
 # Mixed Effect Model
@@ -1187,47 +1236,48 @@ train4_tract %>%
 ```{r}
 linear_1 <- lmer(rides ~ 
 total_pop_density
-+ avg_low_income
-+ avg_middle_income
-+ avg_latino_alone
-+ avg_white_alone
-+ avg_asian_alone
-+ avg_other
-+ avg_vehicle_available 
-+ (1 | year), train3_tract)
++ (1 | year), train4_tract)
 
 linear_2 <- lmer(rides ~ 
 total_pop_density
-+ avg_low_income
-+ avg_middle_income
-+ avg_latino_alone
-+ avg_white_alone
-+ avg_asian_alone
-+ avg_other
-+ avg_vehicle_available 
 + (1 | daytype) 
-+ (1 | year), train3_tract)
++ (1 | year), train4_tract)
 
 linear_3 <- lmer(rides ~ 
 total_pop_density
-+ avg_low_income
-+ avg_middle_income
-+ avg_latino_alone
-+ avg_white_alone
-+ avg_asian_alone
-+ avg_other
-+ avg_vehicle_available
 + (1 | stationname) 
 + (1 | daytype) 
-+ (1 | year), train3_tract)
++ (1 | year), train4_tract)
+
+train5_tract <- train4_tract %>%
+  mutate(line = case_when(
+    Red == 1 ~ "Red",
+    Blue == 1 ~ "Blue",
+    Orange == 1 ~ "Orange",
+    Purple == 1 ~ "Pruple",
+    Brown == 1 ~ "Brown",
+    Green == 1 ~ "Green",
+    Pink == 1 ~ "Pink",
+    TRUE ~ NA_character_ # どちらも1でない場合はNAにする
+  )) %>%
+  na.omit()
+
+linear_4 <- lmer(rides ~ 
+  total_pop_density
+  + (1 | daytype)
+  + (1 | month)
+  + (1 + total_pop_density | year),
+  data = train5_tract
+)
 
 AIC(linear_1)
 AIC(linear_2)
 AIC(linear_3)
+AIC(linear_4)
 
-summary(linear_3)
+summary(linear_4)
 
-r2_nakagawa(linear_3)
+r2_nakagawa(linear_4)
 
 ```
 
